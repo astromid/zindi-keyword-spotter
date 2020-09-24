@@ -1,12 +1,13 @@
-import torch
 import warnings
-from torch.utils.data import Dataset
-from tqdm.auto import tqdm
 from pathlib import Path
 from typing import Optional, Sequence
+
+import numpy as np
+import torch
 from scipy.io import wavfile
 from sklearn.preprocessing import LabelEncoder
-import numpy as np
+from torch.utils.data import Dataset
+from tqdm.auto import tqdm
 
 
 def pad_sample(sample: np.ndarray, pad_length: int) -> np.ndarray:
