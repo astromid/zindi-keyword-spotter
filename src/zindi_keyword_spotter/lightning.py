@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import pytorch_lightning as pl
@@ -7,8 +8,8 @@ import torch.nn.functional as F
 from torch.optim import Adam, Optimizer
 from torch.utils.data import DataLoader
 
-from dataset import ZindiAudioDataset
-from models import PalSolModel
+from .dataset import ZindiAudioDataset
+from .models import PalSolModel
 
 
 class PalSolClassifier(pl.LightningModule):
@@ -27,6 +28,14 @@ class PalSolClassifier(pl.LightningModule):
 
         result = pl.TrainResult(loss)
         result.log('train_loss', loss, on_epoch=True)
+        return result
+    
+    def validation_step(self, batch, *args) -> pl.EvalResult:
+        x, y = batch
+        y_hat = self(x)
+        loss = F.cross_entropy(y_hat, y.long())
+        result = pl.EvalResult(checkpoint_on=loss)
+        result.log('val_loss', loss, on_epoch=True)
         return result
     
     def configure_optimizers(self) -> Optional[Union[Optimizer, Sequence[Optimizer], Dict, Sequence[Dict], Tuple[List, List]]]:
