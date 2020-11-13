@@ -1,11 +1,12 @@
-import warnings
+from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from typing import Optional, Sequence
 
+import librosa
 import numpy as np
+import pandas as pd
 import torch
-from scipy.io import wavfile
 from sklearn.preprocessing import LabelEncoder
+# from librosa.effects import time_stretch
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 
@@ -23,30 +24,30 @@ class ZindiAudioDataset(Dataset):
     def __init__(
         self,
         pad_length: int,
-        sample_rate: int,
-        file_paths: Optional[Sequence[Path]] = None,
-        labels: Optional[Sequence[str]] = None,
+        input_df: pd.DataFrame,
+        data_dir: Path,
+        mode: str = 'train',
     ) -> None:
         super().__init__()
         self.pad_length = pad_length
-        self.sample_rate = sample_rate
-        self.file_paths = file_paths
-        self.labels = labels
+        self.input_df = input_df
+        self.data_dir = data_dir
         self.le = None
         self.label_idxs = None
+        self.mode = mode
         
-        if self.labels is not None:
+        if self.mode == 'train':
             self.le = LabelEncoder()
-            self.le.fit(sorted(self.labels))
-            self.label_idxs = self.le.transform(self.labels)
+            self.le.fit(sorted(self.input_df['label'].values))
+            self.label_ids = self.le.transform(self.input_df['label'].values)
         
         self.samples = []
-        for path in tqdm(self.file_paths, desc='Loading files'):
-            rate, sample = wavfile.read(path)
-            self.samples.append(sample)
-
-            if rate != self.sample_rate:
-                warnings.warn(f'File {path.name} has different sample rate {rate}')
+        self.sample_paths = [self.data_dir / f_path for f_path in self.input_df['fn'].values]
+        with tqdm(desc='Loading samples', total=len(self.input_df)) as pbar:
+            with ThreadPool(16) as pool:
+                for sample, _ in pool.imap(librosa.load, self.sample_paths):
+                    self.samples.append(sample)
+                    pbar.update()
 
     def __len__(self) -> int:
         return len(self.samples)

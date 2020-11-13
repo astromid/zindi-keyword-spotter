@@ -1,42 +1,51 @@
 from pathlib import Path
-import re
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
+import numpy as np
+import pandas as pd
 import pytorch_lightning as pl
-import torch
 import torch.nn.functional as F
+from torch.nn import Module
 from torch.optim import Adam, Optimizer
-from torch.utils.data import DataLoader
+from torch.tensor import Tensor
+from torch.utils.data import Dataset, DataLoader
 
-from .dataset import ZindiAudioDataset
-from .models import PalSolModel
+from zindi_keyword_spotter.dataset import ZindiAudioDataset
 
 
-class PalSolClassifier(pl.LightningModule):
+class PLClassifier(pl.LightningModule):
 
-    def __init__(self, num_classes: int, sample_rate: int) -> None:
+    def __init__(self, model: Module) -> None:
         super().__init__()
-        self.model = PalSolModel(num_classes, sample_rate)
+        self.model = model
+        self.probs_matrix: Optional[np.ndarray] = None
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
     
-    def training_step(self, batch, *args) -> pl.TrainResult:
+    def training_step(self, batch, batch_idx: int) -> Tensor:
         x, y = batch
         y_hat = self(x)
         loss = F.cross_entropy(y_hat, y.long())
 
-        result = pl.TrainResult(loss)
-        result.log('train_loss', loss, on_epoch=True)
-        return result
+        self.log('train_loss', loss, on_epoch=True)
+        return loss
     
-    def validation_step(self, batch, *args) -> pl.EvalResult:
+    def validation_step(self, batch, batch_idx: int) -> Tensor:
         x, y = batch
         y_hat = self(x)
         loss = F.cross_entropy(y_hat, y.long())
-        result = pl.EvalResult(checkpoint_on=loss)
-        result.log('val_loss', loss, on_epoch=True)
-        return result
+        
+        self.log('val_loss', loss, on_epoch=True)
+        return loss
+    
+    def test_step(self, batch, batch_idx: int) -> Tensor:
+        logits = self(batch)
+        probs = F.softmax(logits)
+        return probs.numpy()
+    
+    def test_epoch_end(self, outputs: List[np.ndarray]) -> None:
+        self.probs_matrix = np.vstack(outputs)
     
     def configure_optimizers(self) -> Optional[Union[Optimizer, Sequence[Optimizer], Dict, Sequence[Dict], Tuple[List, List]]]:
         return Adam(self.parameters(), lr=1e-3)
@@ -47,37 +56,37 @@ class ZindiDataModule(pl.LightningDataModule):
     def __init__(
         self,
         pad_length: int,
-        sample_rate: int,
         batch_size: int,
-        train_files: Optional[Sequence[Path]] = None,
-        train_labels: Optional[Sequence[str]] = None,
-        val_files: Optional[Sequence[Path]] = None,
-        val_labels: Optional[Sequence[str]] = None,
-        test_files: Optional[Sequence[Path]] = None,
+        data_dir: Path,
+        train_df: Optional[pd.DataFrame] = None,
+        val_df: Optional[pd.DataFrame] = None,
+        test_df: Optional[pd.DataFrame] = None,
     ) -> None:
         self.pad_length = pad_length
-        self.sample_rate = sample_rate
         self.batch_size = batch_size
-        self.train_files = train_files
-        self.train_labels = train_labels
-        self.val_files = val_files
-        self.val_labels = val_labels
-        self.test_files = test_files
-    
-    def setup(self, stage: Optional[str]) -> None:
-        if stage == 'fit' or (stage is None and self.train_files is not None):
-            self.zindi_train = ZindiAudioDataset(self.pad_length, self.sample_rate, self.test_files, self.train_labels)
-            if self.val_files is not None and self.val_labels is not None:
-                self.zindi_val = ZindiAudioDataset(self.pad_length, self.sample_rate, self.val_files, self.val_labels)
+        self.data_dir = data_dir
+        self.train_df = train_df
+        self.val_df = val_df
+        self.test_df = test_df
 
-        if stage == 'test' or (stage is None and self.test_files is not None):
-            self.zindi_test = ZindiAudioDataset(self.pad_length, self.sample_rate, self.test_files)
+        self.train: Optional[Dataset] = None
+        self.val: Optional[Dataset] = None
+        self.test: Optional[Dataset] = None
+    
+    def setup(self, stage: Optional[str] = None) -> None:
+        if stage == 'fit' or (stage is None and self.train_df is not None):
+            self.train = ZindiAudioDataset(self.pad_length, self.train_df, data_dir=self.data_dir, mode='train')
+            if self.val_df is not None:
+                self.val = ZindiAudioDataset(self.pad_length, self.val_df, data_dir=self.data_dir, mode='val')
+
+        if stage == 'test' or (stage is None and self.test_df is not None):
+            self.test = ZindiAudioDataset(self.pad_length, self.test_df, data_dir=self.data_dir, mode='test')
     
     def train_dataloader(self) -> DataLoader:
-        return DataLoader(self.zindi_train, batch_size=self.batch_size)
+        return DataLoader(self.train, batch_size=self.batch_size, shuffle=True, pin_memory=True)
 
     def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
-        return DataLoader(self.zindi_val, batch_size=self.batch_size)
+        return DataLoader(self.val, batch_size=self.batch_size, shuffle=False, pin_memory=True)
 
     def test_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
-        return DataLoader(self.zindi_test, batch_size=self.batch_size)
+        return DataLoader(self.test, batch_size=1, shuffle=False)

@@ -1,0 +1,32 @@
+# main data params
+seed: 14300631
+sample_rate: 22050
+pad_length: 54243
+all_train_csv: data/raw/all_train.csv
+test_csv: data/raw/SampleSubmission.csv
+val_size: 0.2
+data_dir: data/raw
+# future augs & tricks params
+balance: False
+eps_smooth: 0
+time_shift: 2000
+speed_tune: 0.2
+volume_tune: 0.2
+noise_vol: 0.4
+# model params
+hop_lenght: 424
+n_mels: 128
+n_fft: 2048
+power: 2.0
+normalize: True
+use_decibels: True
+# training params
+batch_size: 64
+lr: 0.001
+scheduler: None
+epochs: 2
+# hydra
+hydra:
+  run:
+    dir: models/seresnet3-${now:%m-%d_%H-%M}
+    verbose: __main__
