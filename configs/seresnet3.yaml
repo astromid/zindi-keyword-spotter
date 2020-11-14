@@ -2,10 +2,11 @@
 seed: 14300631
 sample_rate: 22050
 pad_length: 54243
-all_train_csv: data/raw/all_train.csv
-test_csv: data/raw/SampleSubmission.csv
-val_size: 0.2
-data_dir: data/raw
+all_train_csv: /home/ybudakyan/zindi-keyword-spotter/data/raw/all_train.csv
+test_csv: /home/ybudakyan/zindi-keyword-spotter/data/raw/SampleSubmission.csv
+val_size: 0.25
+data_dir: /home/ybudakyan/zindi-keyword-spotter/data/raw
+n_threads: 2
 # future augs & tricks params
 balance: False
 eps_smooth: 0
@@ -14,19 +15,19 @@ speed_tune: 0.2
 volume_tune: 0.2
 noise_vol: 0.4
 # model params
-hop_lenght: 424
+hop_length: 424
 n_mels: 128
 n_fft: 2048
 power: 2.0
 normalize: True
 use_decibels: True
 # training params
-batch_size: 64
+batch_size: 256
 lr: 0.001
 scheduler: None
-epochs: 2
+epochs: 100
 # hydra
 hydra:
   run:
     dir: models/seresnet3-${now:%m-%d_%H-%M}
-    verbose: __main__
+  verbose: __main__

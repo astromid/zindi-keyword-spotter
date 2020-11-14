@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.nn import Module
 from torch.optim import Adam, Optimizer
 from torch.tensor import Tensor
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from zindi_keyword_spotter.dataset import ZindiAudioDataset
 
@@ -41,8 +41,8 @@ class PLClassifier(pl.LightningModule):
     
     def test_step(self, batch, batch_idx: int) -> Tensor:
         logits = self(batch)
-        probs = F.softmax(logits)
-        return probs.numpy()
+        probs = F.softmax(logits, dim=1)
+        return probs.cpu().numpy()
     
     def test_epoch_end(self, outputs: List[np.ndarray]) -> None:
         self.probs_matrix = np.vstack(outputs)
@@ -58,13 +58,17 @@ class ZindiDataModule(pl.LightningDataModule):
         pad_length: int,
         batch_size: int,
         data_dir: Path,
+        n_threads: int,
         train_df: Optional[pd.DataFrame] = None,
         val_df: Optional[pd.DataFrame] = None,
         test_df: Optional[pd.DataFrame] = None,
     ) -> None:
+        super().__init__()
         self.pad_length = pad_length
         self.batch_size = batch_size
         self.data_dir = data_dir
+        self.n_threads = n_threads
+
         self.train_df = train_df
         self.val_df = val_df
         self.test_df = test_df
@@ -75,9 +79,9 @@ class ZindiDataModule(pl.LightningDataModule):
     
     def setup(self, stage: Optional[str] = None) -> None:
         if stage == 'fit' or (stage is None and self.train_df is not None):
-            self.train = ZindiAudioDataset(self.pad_length, self.train_df, data_dir=self.data_dir, mode='train')
+            self.train = ZindiAudioDataset(self.pad_length, self.train_df, data_dir=self.data_dir, mode='train', n_threads=self.n_threads)
             if self.val_df is not None:
-                self.val = ZindiAudioDataset(self.pad_length, self.val_df, data_dir=self.data_dir, mode='val')
+                self.val = ZindiAudioDataset(self.pad_length, self.val_df, data_dir=self.data_dir, mode='val', le=self.train.le, n_threads=self.n_threads)
 
         if stage == 'test' or (stage is None and self.test_df is not None):
             self.test = ZindiAudioDataset(self.pad_length, self.test_df, data_dir=self.data_dir, mode='test')
