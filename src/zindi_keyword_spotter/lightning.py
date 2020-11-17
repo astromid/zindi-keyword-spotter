@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
+import torch
 import torch.nn.functional as F
 from torch.nn import Module
 from torch.optim import Adam, Optimizer
@@ -15,10 +16,12 @@ from zindi_keyword_spotter.dataset import ZindiAudioDataset
 
 class PLClassifier(pl.LightningModule):
 
-    def __init__(self, model: Module) -> None:
+    def __init__(self, model: Module, lr: float, weights: Optional[Tensor] = None) -> None:
         super().__init__()
         self.model = model
-        self.probs_matrix: Optional[np.ndarray] = None
+        self.lr = lr
+        self.weights = weights
+        self.probs: Optional[np.ndarray] = None
     
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
@@ -26,29 +29,28 @@ class PLClassifier(pl.LightningModule):
     def training_step(self, batch, batch_idx: int) -> Tensor:
         x, y = batch
         y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y.long())
+        loss = F.cross_entropy(y_hat, y, weight=self.weights.type_as(x))
 
-        self.log('train_loss', loss, on_epoch=True)
+        self.log('train_loss', loss)
         return loss
     
     def validation_step(self, batch, batch_idx: int) -> Tensor:
         x, y = batch
         y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y.long())
+        loss = F.cross_entropy(y_hat, y, weight=self.weights.type_as(x))
         
-        self.log('val_loss', loss, on_epoch=True)
+        self.log('val_loss', loss, prog_bar=True)
         return loss
     
     def test_step(self, batch, batch_idx: int) -> Tensor:
-        logits = self(batch)
-        probs = F.softmax(logits, dim=1)
-        return probs.cpu().numpy()
+        return self(batch).cpu()
     
     def test_epoch_end(self, outputs: List[np.ndarray]) -> None:
-        self.probs_matrix = np.vstack(outputs)
+        logits = torch.vstack(outputs)
+        self.probs = F.softmax(logits, dim=1).numpy()
     
     def configure_optimizers(self) -> Optional[Union[Optimizer, Sequence[Optimizer], Dict, Sequence[Dict], Tuple[List, List]]]:
-        return Adam(self.parameters(), lr=1e-3)
+        return Adam(self.parameters(), lr=self.lr)
 
 
 class ZindiDataModule(pl.LightningDataModule):
@@ -58,7 +60,7 @@ class ZindiDataModule(pl.LightningDataModule):
         pad_length: int,
         batch_size: int,
         data_dir: Path,
-        n_threads: int,
+        label2idx: Optional[Dict[str, int]] = None,
         train_df: Optional[pd.DataFrame] = None,
         val_df: Optional[pd.DataFrame] = None,
         test_df: Optional[pd.DataFrame] = None,
@@ -67,8 +69,8 @@ class ZindiDataModule(pl.LightningDataModule):
         self.pad_length = pad_length
         self.batch_size = batch_size
         self.data_dir = data_dir
-        self.n_threads = n_threads
 
+        self.label2idx = label2idx
         self.train_df = train_df
         self.val_df = val_df
         self.test_df = test_df
@@ -79,9 +81,9 @@ class ZindiDataModule(pl.LightningDataModule):
     
     def setup(self, stage: Optional[str] = None) -> None:
         if stage == 'fit' or (stage is None and self.train_df is not None):
-            self.train = ZindiAudioDataset(self.pad_length, self.train_df, data_dir=self.data_dir, mode='train', n_threads=self.n_threads)
+            self.train = ZindiAudioDataset(self.pad_length, self.train_df, data_dir=self.data_dir, mode='train', label2idx=self.label2idx)
             if self.val_df is not None:
-                self.val = ZindiAudioDataset(self.pad_length, self.val_df, data_dir=self.data_dir, mode='val', le=self.train.le, n_threads=self.n_threads)
+                self.val = ZindiAudioDataset(self.pad_length, self.val_df, data_dir=self.data_dir, mode='val', label2idx=self.label2idx)
 
         if stage == 'test' or (stage is None and self.test_df is not None):
             self.test = ZindiAudioDataset(self.pad_length, self.test_df, data_dir=self.data_dir, mode='test')

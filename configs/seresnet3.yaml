@@ -1,31 +1,51 @@
 # main data params
 seed: 14300631
-sample_rate: 22050
-pad_length: 54243
+sample_rate: 16000
+pad_length: 32000
 all_train_csv: /home/ybudakyan/zindi-keyword-spotter/data/raw/all_train.csv
 test_csv: /home/ybudakyan/zindi-keyword-spotter/data/raw/SampleSubmission.csv
-val_size: 0.25
-data_dir: /home/ybudakyan/zindi-keyword-spotter/data/raw
-n_threads: 2
+val_size: 0.2
+data_dir: /home/ybudakyan/zindi-keyword-spotter/data/interim
+train_utts: [
+  'd027264654b94950aeb204f64d05d8d7',
+  '2497942026ef4d7e97d47fc2738d7c27',
+  '1b5a69c4b88b41eb9577a656e11bb7dd',
+  'd45cd9903b3044d494866b3162651a76',
+  '5aa4893526794a73a3ed0a7ebba2a7bf',
+  '0a8fccdb95b749dca0404bf433872764',
+  '79aac18aacc74cc092d00778f7f323da',
+  '9181ed273f5b460ba7dd7a5b2d7f0612',
+  '630517ca2f8642cdae94a181a728f566'
+]
+val_utts: [
+  '6fbfcce2cf21419e97290f9e12934f65',
+  '771b5044334242fb9caff8a71fd7891e',
+  '744b1a437234489fae9512694d2212ae',
+  '3d43af6faf2244c288154dc4ff6a734f',
+  'eb702740d41f4f389192ec5c6a3ae95f',
+  '655ab13e2b784ceabf71f38c1e9d5976',
+  '62a43378312341918722fbe81a34ffd7',
+  'eaea87cf8db24035bde28e73a536e278',
+]
 # future augs & tricks params
-balance: False
+balance: True
 eps_smooth: 0
 time_shift: 2000
 speed_tune: 0.2
 volume_tune: 0.2
 noise_vol: 0.4
 # model params
-hop_length: 424
+hop_length: 125
 n_mels: 128
 n_fft: 2048
 power: 2.0
 normalize: True
 use_decibels: True
 # training params
-batch_size: 256
-lr: 0.001
+batch_size: 128
+lr: 0.0003
 scheduler: None
-epochs: 100
+epochs: 1250
 # hydra
 hydra:
   run:
