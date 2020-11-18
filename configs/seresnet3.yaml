@@ -30,22 +30,22 @@ val_utts: [
 # future augs & tricks params
 balance: True
 eps_smooth: 0
-time_shift: 2000
-speed_tune: 0.2
-volume_tune: 0.2
-noise_vol: 0.4
+time_shift: 0
+speed_tune: 0
+volume_tune: 0
+noise_vol: 0
 # model params
 hop_length: 125
 n_mels: 128
 n_fft: 2048
 power: 2.0
-normalize: True
-use_decibels: True
+normalize: False
+use_decibels: False
 # training params
 batch_size: 128
 lr: 0.0003
 scheduler: None
-epochs: 1250
+epochs: 200
 # hydra
 hydra:
   run:

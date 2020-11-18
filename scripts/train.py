@@ -10,7 +10,6 @@ import torch
 from omegaconf import DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
-from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from zindi_keyword_spotter.lightning import PLClassifier, ZindiDataModule
 from zindi_keyword_spotter.models import SeResNet3
@@ -23,42 +22,21 @@ warnings.simplefilter('ignore')
 def main(cfg: DictConfig) -> None:
     orig_cwd = Path(hydra.utils.get_original_cwd())
     all_train_df = pd.read_csv(orig_cwd / cfg.all_train_csv)
-    all_train_df = all_train_df
     test_df = pd.read_csv(orig_cwd / cfg.test_csv)
     data_dir = Path(cfg.data_dir)
     label2idx = {label: idx for idx, label in enumerate(test_df.columns[1:])}
 
     pl.seed_everything(cfg.seed)
-    utt_counts = all_train_df['utt_id'].value_counts()
-    unique_utts = utt_counts[utt_counts == 1].index.values
-    
-    unique_utts = all_train_df[all_train_df['utt_id'].isin(unique_utts)]
-    nonunique_utts = all_train_df[~all_train_df['utt_id'].isin(unique_utts)]
-    
-    train_df1, val_df1 = train_test_split(unique_utts, stratify=unique_utts['label'], random_state=cfg.seed, test_size=cfg.val_size)
-    train_df2 = nonunique_utts[nonunique_utts['utt_id'].isin(cfg.train_utts)]
-    val_df2 = nonunique_utts[nonunique_utts['utt_id'].isin(cfg.val_utts)]
-    
-    train_df = pd.concat((train_df1, train_df2), axis=0)
-    val_df = pd.concat((val_df1, val_df2), axis=0)
-
-    all_labels = sorted(all_train_df['label'].unique())
-    train_labels = sorted(train_df['label'].unique())
-    if not (all_labels == train_labels):
-        raise ValueError('train_df is corrupted: some labels are gone.')
-
-    train_df.to_csv(Path.cwd() / 'current_train.csv', index=False)
-    val_df.to_csv(Path.cwd() / 'current_val.csv', index=False)
 
     datamodule = ZindiDataModule(
-        pad_length=cfg.pad_length,
-        batch_size=cfg.batch_size,
+        cfg=cfg,
         data_dir=data_dir,
         label2idx=label2idx,
-        train_df=train_df,
-        val_df=val_df,
+        train_df=all_train_df,
         test_df=test_df,
     )
+    datamodule.prepare_data()
+    train_df = datamodule.train_df
 
     if cfg.balance:
         class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), train_df['label'])
@@ -96,7 +74,6 @@ def main(cfg: DictConfig) -> None:
     trainer = pl.Trainer(
         max_epochs=cfg.epochs,
         gpus=1,
-        # distributed_backend='ddp',
         logger=logger,
         callbacks=[checkpoint_callback],
     )
