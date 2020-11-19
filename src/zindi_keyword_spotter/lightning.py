@@ -10,18 +10,21 @@ from omegaconf.dictconfig import DictConfig
 from sklearn.model_selection import train_test_split
 from torch.nn import Module
 from torch.optim import Adam, Optimizer
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.tensor import Tensor
 from torch.utils.data import DataLoader, Dataset
+from torchsampler import ImbalancedDatasetSampler
 
 from zindi_keyword_spotter.dataset import ZindiAudioDataset
 
 
 class PLClassifier(pl.LightningModule):
 
-    def __init__(self, model: Module, lr: float, weights: Optional[Tensor] = None) -> None:
+    def __init__(self, model: Module, lr: float, scheduler: Optional[str], weights: Optional[Tensor] = None) -> None:
         super().__init__()
         self.model = model
         self.lr = lr
+        self.scheduler = scheduler
         self.weights = weights
         self.probs: Optional[np.ndarray] = None
     
@@ -31,16 +34,15 @@ class PLClassifier(pl.LightningModule):
     def training_step(self, batch, batch_idx: int) -> Tensor:
         x, y = batch
         y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y, weight=self.weights.type_as(x))
-
+        weight = self.weights.type_as(x) if self.weights is not None else None
+        loss = F.cross_entropy(y_hat, y, weight=weight)
         self.log('train_loss', loss)
         return loss
     
     def validation_step(self, batch, batch_idx: int) -> Tensor:
         x, y = batch
         y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y, weight=self.weights.type_as(x))
-        
+        loss = F.cross_entropy(y_hat, y)
         self.log('val_loss', loss, prog_bar=True)
         return loss
     
@@ -52,7 +54,15 @@ class PLClassifier(pl.LightningModule):
         self.probs = F.softmax(logits, dim=1).numpy()
     
     def configure_optimizers(self) -> Optional[Union[Optimizer, Sequence[Optimizer], Dict, Sequence[Dict], Tuple[List, List]]]:
-        return Adam(self.parameters(), lr=self.lr)
+        optimizer = Adam(self.parameters(), lr=self.lr)
+        if self.scheduler is None:
+            return optimizer
+        elif self.scheduler == 'plateau':
+            return {
+                'optimizer': optimizer,
+                'lr_scheduler': ReduceLROnPlateau(optimizer, factor=0.3, patience=5, eps=1e-5, cooldown=3, min_lr=1e-6, verbose=True),
+                'monitor': 'val_loss',
+            }
 
 
 class ZindiDataModule(pl.LightningDataModule):
@@ -65,6 +75,7 @@ class ZindiDataModule(pl.LightningDataModule):
         label2idx: Optional[Dict[str, int]] = None,
         train_df: Optional[pd.DataFrame] = None,
         test_df: Optional[pd.DataFrame] = None,
+        balance_sampler: bool = False,
     ) -> None:
         super().__init__()
         self.pad_length = cfg.pad_length
@@ -85,6 +96,7 @@ class ZindiDataModule(pl.LightningDataModule):
         self.train_df = train_df
         self.test_df = test_df
         self.val_df = None
+        self.balance_sampler = balance_sampler
 
         self.train: Optional[Dataset] = None
         self.val: Optional[Dataset] = None
@@ -125,7 +137,8 @@ class ZindiDataModule(pl.LightningDataModule):
             self.test = ZindiAudioDataset(self.pad_length, self.test_df, data_dir=self.data_dir, mode='test')
     
     def train_dataloader(self) -> DataLoader:
-        return DataLoader(self.train, batch_size=self.batch_size, shuffle=True, pin_memory=True)
+        sampler = ImbalancedDatasetSampler(self.train) if self.balance_sampler else None
+        return DataLoader(self.train, sampler=sampler, batch_size=self.batch_size, shuffle=True, pin_memory=True)
 
     def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
         return DataLoader(self.val, batch_size=self.batch_size, shuffle=False, pin_memory=True)
