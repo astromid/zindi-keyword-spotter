@@ -80,12 +80,12 @@ class ZindiAudioDataset(Dataset):
             aug_flags = [1, 1, 1]
         else:
             aug_flags = [random.uniform(0, 1) for _ in range(3)]
-        if self.aug_config['time_shift'] != 0 and aug_flags[0] < 0.5:
+        if aug_flags[0] < 0.5 and self.aug_config['time_shift'] != 0:
             sample = time_shift(sample, self.aug_config['time_shift'])
-        if self.aug_config['speed_tune'] != 0 and aug_flags[1] < 0.5:
+        if aug_flags[1] < 0.5 and self.aug_config['speed_tune'] != 0:
             sample = speed_tune(sample, self.aug_config['speed_tune'])
         sample = pad_sample(sample, self.pad_length)
-        if self.aug_config['noise_vol'] != 0 and aug_flags[2] < 0.5:
+        if aug_flags[2] < 0.5 and self.aug_config['noise_vol'] != 0:
             noise_sample = get_noise(self.pad_length)
             sample = add_noise(sample, noise_sample, self.aug_config['volume_tune'], self.aug_config['noise_vol'])
         if self.label2idx is not None:

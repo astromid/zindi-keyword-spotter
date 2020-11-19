@@ -27,7 +27,7 @@ val_utts: [
   '62a43378312341918722fbe81a34ffd7',
   'eaea87cf8db24035bde28e73a536e278',
 ]
-# future augs & tricks params
+# augs & tricks params
 balance: True
 eps_smooth: 0
 time_shift: 0
@@ -35,7 +35,7 @@ speed_tune: 0
 volume_tune: 0
 noise_vol: 0
 # model params
-hop_length: 125
+hop_length: 250
 n_mels: 128
 n_fft: 2048
 power: 2.0

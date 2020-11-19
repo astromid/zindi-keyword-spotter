@@ -31,6 +31,7 @@ def main(cfg: DictConfig) -> None:
     datamodule = ZindiDataModule(
         cfg=cfg,
         data_dir=data_dir,
+        log_dir=Path.cwd(),
         label2idx=label2idx,
         train_df=all_train_df,
         test_df=test_df,
@@ -73,7 +74,7 @@ def main(cfg: DictConfig) -> None:
 
     trainer = pl.Trainer(
         max_epochs=cfg.epochs,
-        gpus=1,
+        gpus=[1],
         logger=logger,
         callbacks=[checkpoint_callback],
     )
