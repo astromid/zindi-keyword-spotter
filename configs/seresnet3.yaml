@@ -28,7 +28,8 @@ val_utts: [
   'eaea87cf8db24035bde28e73a536e278',
 ]
 # augs & tricks params
-balance: True
+balance_weights: False
+balance_sampler: True
 eps_smooth: 0
 time_shift: 0
 speed_tune: 0
@@ -39,15 +40,19 @@ hop_length: 250
 n_mels: 128
 n_fft: 2048
 power: 2.0
-normalize: False
+normalize: True
 use_decibels: False
 # training params
+gpus: '1'
+loss: 'ce'
 batch_size: 128
-lr: 0.0003
-scheduler: None
-epochs: 200
+lr: 0.0001
+lr_find: False
+scheduler: null
+epochs: 500
+n_workers: 2
 # hydra
 hydra:
   run:
     dir: models/seresnet3-${now:%m-%d_%H-%M}
-  verbose: __main__
+  # verbose: __main__

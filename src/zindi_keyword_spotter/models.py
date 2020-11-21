@@ -142,7 +142,6 @@ class SeResNet3(nn.Module):
         self.conv5 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, padding=1)
         self.bn5 = nn.BatchNorm2d(num_features=256)
 
-        # self.dense = nn.Linear(in_features=256, out_features=256)
         self.logits = nn.Linear(in_features=256, out_features=num_classes)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -188,6 +187,4 @@ class SeResNet3(nn.Module):
         # global avg pooling - get mean from each channel
         # (N, C, H, W) -> (N, C)
         feature_vector = out.mean(dim=(2, 3))
-        # feature_vector = self.dense(feature_vector)
-        # feature_vector = F.dropout(feature_vector, p=0.2)
         return self.logits(feature_vector)

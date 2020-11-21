@@ -76,18 +76,16 @@ class ZindiAudioDataset(Dataset):
     
     def __getitem__(self, idx: int):
         sample = self.samples[idx]
-        if self.mode != 'train':
-            aug_flags = [1, 1, 1]
-        else:
+        if self.mode == 'train':
             aug_flags = [random.uniform(0, 1) for _ in range(3)]
-        if aug_flags[0] < 0.5 and self.aug_config['time_shift'] != 0:
-            sample = time_shift(sample, self.aug_config['time_shift'])
-        if aug_flags[1] < 0.5 and self.aug_config['speed_tune'] != 0:
-            sample = speed_tune(sample, self.aug_config['speed_tune'])
+            if aug_flags[0] < 0.5 and self.aug_config['time_shift'] != 0:
+                sample = time_shift(sample, self.aug_config['time_shift'])
+            if aug_flags[1] < 0.5 and self.aug_config['speed_tune'] != 0:
+                sample = speed_tune(sample, self.aug_config['speed_tune'])
+            if aug_flags[2] < 0.5 and self.aug_config['noise_vol'] != 0:
+                noise_sample = get_noise(len(sample))
+                sample = add_noise(sample, noise_sample, self.aug_config['volume_tune'], self.aug_config['noise_vol'])
         sample = pad_sample(sample, self.pad_length)
-        if aug_flags[2] < 0.5 and self.aug_config['noise_vol'] != 0:
-            noise_sample = get_noise(self.pad_length)
-            sample = add_noise(sample, noise_sample, self.aug_config['volume_tune'], self.aug_config['noise_vol'])
         if self.label2idx is not None:
             return sample, self.label2idx[self.labels[idx]]
         else:

@@ -6,6 +6,7 @@ import hydra
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
+import seaborn as sns
 import torch
 from omegaconf import DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -14,6 +15,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from zindi_keyword_spotter.lightning import PLClassifier, ZindiDataModule
 from zindi_keyword_spotter.models import SeResNet3
 
+sns.set()
 LOG = logging.getLogger(__name__)
 warnings.simplefilter('ignore')
 
@@ -27,7 +29,6 @@ def main(cfg: DictConfig) -> None:
     label2idx = {label: idx for idx, label in enumerate(test_df.columns[1:])}
 
     pl.seed_everything(cfg.seed)
-
     datamodule = ZindiDataModule(
         cfg=cfg,
         data_dir=data_dir,
@@ -35,13 +36,15 @@ def main(cfg: DictConfig) -> None:
         label2idx=label2idx,
         train_df=all_train_df,
         test_df=test_df,
+        balance_sampler=cfg.balance_sampler,
     )
     datamodule.prepare_data()
+    datamodule.setup()
     train_df = datamodule.train_df
 
-    if cfg.balance:
+    if cfg.balance_weights:
         class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), train_df['label'])
-        class_weights = torch.from_numpy(class_weights)
+        class_weights = torch.from_numpy(class_weights).float()
     else:
         class_weights = None
 
@@ -56,7 +59,13 @@ def main(cfg: DictConfig) -> None:
         use_decibels=cfg.use_decibels,
     )
 
-    pl_model = PLClassifier(model, cfg.lr, class_weights)
+    pl_model = PLClassifier(
+        model=model,
+        loss_name=cfg.loss,
+        lr=cfg.lr,
+        scheduler=cfg.scheduler,
+        weights=class_weights,
+    )
 
     logger = WandbLogger(
         project='zindi-keyword-spotter',
@@ -70,14 +79,21 @@ def main(cfg: DictConfig) -> None:
         filename='seresnet3-{epoch:02d}-{val_loss:.3f}',
         save_top_k=3,
         mode='min',
+        save_last=True,
     )
 
     trainer = pl.Trainer(
         max_epochs=cfg.epochs,
-        gpus=[0],
+        gpus=cfg.gpus,
         logger=logger,
         callbacks=[checkpoint_callback],
     )
+    if cfg.lr_find:
+        lr_finder = trainer.tuner.lr_find(pl_model, train_dataloader=datamodule.train_dataloader())
+        fig = lr_finder.plot(suggest=True)
+        fig.savefig(Path.cwd() / 'lr_find.png')
+        pl_model.lr = lr_finder.suggestion()
+
     trainer.fit(pl_model, datamodule)
 
     trainer.test()
