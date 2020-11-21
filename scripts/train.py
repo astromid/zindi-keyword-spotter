@@ -29,7 +29,6 @@ def main(cfg: DictConfig) -> None:
     label2idx = {label: idx for idx, label in enumerate(test_df.columns[1:])}
 
     pl.seed_everything(cfg.seed)
-
     datamodule = ZindiDataModule(
         cfg=cfg,
         data_dir=data_dir,
@@ -45,7 +44,7 @@ def main(cfg: DictConfig) -> None:
 
     if cfg.balance_weights:
         class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), train_df['label'])
-        class_weights = torch.from_numpy(class_weights)
+        class_weights = torch.from_numpy(class_weights).float()
     else:
         class_weights = None
 
@@ -60,7 +59,13 @@ def main(cfg: DictConfig) -> None:
         use_decibels=cfg.use_decibels,
     )
 
-    pl_model = PLClassifier(model, cfg.lr, cfg.scheduler, class_weights)
+    pl_model = PLClassifier(
+        model=model,
+        loss_name=cfg.loss,
+        lr=cfg.lr,
+        scheduler=cfg.scheduler,
+        weights=class_weights,
+    )
 
     logger = WandbLogger(
         project='zindi-keyword-spotter',
@@ -74,11 +79,12 @@ def main(cfg: DictConfig) -> None:
         filename='seresnet3-{epoch:02d}-{val_loss:.3f}',
         save_top_k=3,
         mode='min',
+        save_last=True,
     )
 
     trainer = pl.Trainer(
         max_epochs=cfg.epochs,
-        gpus=[0],
+        gpus=cfg.gpus,
         logger=logger,
         callbacks=[checkpoint_callback],
     )
