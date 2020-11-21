@@ -74,7 +74,7 @@ def main(cfg: DictConfig) -> None:
 
     trainer = pl.Trainer(
         max_epochs=cfg.epochs,
-        gpus=[1],
+        gpus=[0],
         logger=logger,
         callbacks=[checkpoint_callback],
     )
