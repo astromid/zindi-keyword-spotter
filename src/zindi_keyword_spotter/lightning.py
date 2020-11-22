@@ -125,23 +125,28 @@ class ZindiDataModule(pl.LightningDataModule):
     
     def prepare_data(self) -> None:
         utt_counts = self.train_df['utt_id'].value_counts()
+        # get utt_ids that occure only once in dataset
         unique_utts = utt_counts[utt_counts == 1].index.values
+        # unique part will be divided by usual train_test_split
+        # nonuqnie will be splitted by utt_id
+        unique_utt_samples = self.train_df[self.train_df['utt_id'].isin(unique_utts)]
+        nonunique_utt_sample = self.train_df[~self.train_df['utt_id'].isin(unique_utts)]
 
-        unique_utts = self.train_df[self.train_df['utt_id'].isin(unique_utts)]
-        nonunique_utts = self.train_df[~self.train_df['utt_id'].isin(unique_utts)]
-
-        train_df1, val_df1 = train_test_split(unique_utts, stratify=unique_utts['label'], test_size=self.val_size)
-        train_df2 = nonunique_utts[nonunique_utts['utt_id'].isin(self.train_utts)]
-        val_df2 = nonunique_utts[nonunique_utts['utt_id'].isin(self.val_utts)]
+        train_df1, val_df1 = train_test_split(unique_utt_samples, stratify=unique_utt_samples['label'], test_size=self.val_size)
+        train_df2 = nonunique_utt_sample[nonunique_utt_sample['utt_id'].isin(self.train_utts)]
+        val_df2 = nonunique_utt_sample[nonunique_utt_sample['utt_id'].isin(self.val_utts)]
 
         train_df = pd.concat((train_df1, train_df2), axis=0)
         val_df = pd.concat((val_df1, val_df2), axis=0)
 
         all_labels = sorted(self.train_df['label'].unique())
         train_labels = sorted(train_df['label'].unique())
+        val_labels = sorted(val_df['label'].unique())
         if not (all_labels == train_labels):
             raise ValueError('train_df is corrupted: some labels are gone.')
-
+        if not (all_labels == val_labels):
+            raise ValueError('val_df is corrupted: some labels are gone.')
+        # save current train/val split
         train_df.to_csv(self.log_dir / 'current_train.csv', index=False)
         val_df.to_csv(self.log_dir / 'current_val.csv', index=False)
 
@@ -166,13 +171,12 @@ class ZindiDataModule(pl.LightningDataModule):
                     mode='val',
                     label2idx=self.label2idx,
                 )
-
         if stage == 'test' or (stage is None and self.test_df is not None):
             self.test = ZindiAudioDataset(self.pad_length, self.test_df, data_dir=self.data_dir, mode='test')
     
     def train_dataloader(self) -> DataLoader:
         sampler = ImbalancedDatasetSampler(self.train, callback_get_label=callback_get_label) if self.balance_sampler else None
-        shuffle = False if self.balance_sampler else True
+        shuffle = not self.balance_sampler
         return DataLoader(self.train, sampler=sampler, batch_size=self.batch_size, shuffle=shuffle, pin_memory=True, num_workers=self.n_workers)
 
     def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
