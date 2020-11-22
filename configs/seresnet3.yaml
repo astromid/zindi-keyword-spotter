@@ -29,7 +29,7 @@ val_utts: [
 ]
 # augs & tricks params
 balance_weights: False
-balance_sampler: True
+balance_sampler: False
 eps_smooth: 0
 time_shift: 0
 speed_tune: 0
@@ -41,10 +41,11 @@ n_mels: 128
 n_fft: 2048
 power: 2.0
 normalize: True
-use_decibels: False
+use_decibels: True
 # training params
-gpus: '1'
-loss: 'ce'
+gpus: '0'
+loss: 'focal'
+focal_gamma: 2.0
 batch_size: 128
 lr: 0.0001
 lr_find: False

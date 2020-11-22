@@ -40,16 +40,17 @@ def main(cfg: DictConfig) -> None:
     )
     datamodule.prepare_data()
     datamodule.setup()
-    train_df = datamodule.train_df
-
+    # we assume that LB set is balanced
+    val_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.val_df['label'])
+    val_weights = torch.from_numpy(val_weights).float()
     if cfg.balance_weights:
-        class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), train_df['label'])
+        class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.train_df['label'])
         class_weights = torch.from_numpy(class_weights).float()
     else:
         class_weights = None
 
     model = SeResNet3(
-        num_classes=train_df['label'].nunique(),
+        num_classes=datamodule.train_df['label'].nunique(),
         hop_length=cfg.hop_length,
         sample_rate=cfg.sample_rate,
         n_mels=cfg.n_mels,
@@ -59,12 +60,16 @@ def main(cfg: DictConfig) -> None:
         use_decibels=cfg.use_decibels,
     )
 
+    loss_params = {'gamma': cfg.gamma}
+
     pl_model = PLClassifier(
         model=model,
         loss_name=cfg.loss,
+        loss_params=loss_params,
         lr=cfg.lr,
         scheduler=cfg.scheduler,
         weights=class_weights,
+        val_weights=val_weights,
     )
 
     logger = WandbLogger(
@@ -77,7 +82,7 @@ def main(cfg: DictConfig) -> None:
         monitor='val_loss',
         dirpath=(Path.cwd() / 'checkpoints').as_posix(),
         filename='seresnet3-{epoch:02d}-{val_loss:.3f}',
-        save_top_k=3,
+        save_top_k=2,
         mode='min',
         save_last=True,
     )

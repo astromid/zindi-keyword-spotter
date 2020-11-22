@@ -28,16 +28,21 @@ class PLClassifier(pl.LightningModule):
         lr: float,
         scheduler: Optional[str],
         weights: Optional[Tensor] = None,
+        val_weights: Optional[Tensor] = None,
+        loss_params: Optional[Dict[str, float]] = None,
     ) -> None:
         super().__init__()
         self.model = model
         self.lr = lr
         self.scheduler = scheduler
         self.probs: Optional[np.ndarray] = None
+        # lb metric is log loss
+        self.val_criterion = CrossEntropyLoss(weight=val_weights)
         if loss_name == 'ce':
             self.criterion = CrossEntropyLoss(weight=weights)
         elif loss_name == 'focal':
-            self.criterion = FocalLoss(alpha=weights)
+            gamma = loss_params['gamma']
+            self.criterion = FocalLoss(alpha=weights, gamma=gamma)
 
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
@@ -52,8 +57,7 @@ class PLClassifier(pl.LightningModule):
     def validation_step(self, batch, batch_idx: int) -> Tensor:
         x, y = batch
         y_hat = self(x)
-        # lb metric is log loss
-        loss = F.cross_entropy(y_hat, y)
+        loss = self.val_criterion(y_hat, y)
         self.log('val_loss', loss, prog_bar=True)
         return loss
     
@@ -71,7 +75,7 @@ class PLClassifier(pl.LightningModule):
         elif self.scheduler == 'plateau':
             return {
                 'optimizer': optimizer,
-                'lr_scheduler': ReduceLROnPlateau(optimizer, factor=0.3, patience=5, eps=1e-5, cooldown=3, min_lr=1e-6, verbose=True),
+                'lr_scheduler': ReduceLROnPlateau(optimizer, factor=0.3, patience=10, eps=1e-5, cooldown=3, min_lr=1e-6, verbose=True),
                 'monitor': 'val_loss',
             }
 
