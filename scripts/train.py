@@ -13,14 +13,14 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from sklearn.utils.class_weight import compute_class_weight
 from zindi_keyword_spotter.lightning import PLClassifier, ZindiDataModule
-from zindi_keyword_spotter.models import ResNest, SeResNet3
+from zindi_keyword_spotter.models import ResNest, SeResNet3, WideConvolutionsModel
 
 sns.set()
 LOG = logging.getLogger(__name__)
 warnings.simplefilter('ignore')
 
 
-@hydra.main(config_path='../configs', config_name='seresnet3')
+@hydra.main(config_path='../configs', config_name='model')
 def main(cfg: DictConfig) -> None:
     orig_cwd = Path(hydra.utils.get_original_cwd())
     all_train_df = pd.read_csv(orig_cwd / cfg.all_train_csv)
@@ -36,56 +36,79 @@ def main(cfg: DictConfig) -> None:
         label2idx=label2idx,
         train_df=all_train_df,
         test_df=test_df,
-        balance_sampler=cfg.balance_sampler,
-        n_workers=cfg.n_workers
     )
     datamodule.prepare_data()
     datamodule.setup()
-    train_df = datamodule.train_df
-
+    # we assume that LB set is balanced
+    val_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.val_df['label'])
+    val_weights = torch.from_numpy(val_weights).float()
     if cfg.balance_weights:
-        class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), train_df['label'])
+        class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.train_df['label'])
         class_weights = torch.from_numpy(class_weights).float()
     else:
         class_weights = None
 
-    model = ResNest(
-        num_classes=train_df['label'].nunique(),
-        hop_length=cfg.hop_length,
-        sample_rate=cfg.sample_rate,
-        n_mels=cfg.n_mels,
-        n_fft=cfg.n_fft,
-        power=cfg.power,
-        normalize=cfg.normalize,
-        use_decibels=cfg.use_decibels,
-        resnest_name='resnest269',
-        pretrained=True
-    )
+    if cfg.model == 'seresnet3':
+        model = SeResNet3(
+            num_classes=datamodule.train_df['label'].nunique(),
+            hop_length=cfg.hop_length,
+            sample_rate=cfg.sample_rate,
+            n_mels=cfg.n_mels,
+            n_fft=cfg.n_fft,
+            power=cfg.power,
+            normalize=cfg.normalize,
+            use_decibels=cfg.use_decibels,
+        )
+    elif cfg.model == 'wconv':
+        model = WideConvolutionsModel(
+            num_classes=datamodule.train_df['label'].nunique(),
+            hop_length=cfg.hop_length,
+            sample_rate=cfg.sample_rate,
+            n_mels=cfg.n_mels,
+            n_fft=cfg.n_fft,
+            power=cfg.power,
+            normalize=cfg.normalize,
+            use_decibels=cfg.use_decibels,
+        )
+    elif cfg.model == 'resnest':
+        model = ResNest(
+            num_classes=datamodule.train_df['label'].nunique(),
+            hop_length=cfg.hop_length,
+            sample_rate=cfg.sample_rate,
+            n_mels=cfg.n_mels,
+            n_fft=cfg.n_fft,
+            power=cfg.power,
+            normalize=cfg.normalize,
+            use_decibels=cfg.use_decibels,
+            resnest_name='resnest269',
+            pretrained=True
+        )
+    else:
+        raise ValueError('Incorrect model.')
 
+    loss_params = {'focal_gamma': cfg.focal_gamma}
     pl_model = PLClassifier(
         model=model,
         loss_name=cfg.loss,
+        loss_params=loss_params,
         lr=cfg.lr,
         scheduler=cfg.scheduler,
         weights=class_weights,
+        val_weights=val_weights,
     )
-
     logger = WandbLogger(
         project='zindi-keyword-spotter',
         name=Path.cwd().name,
         config=dict(cfg),
     )
-
     checkpoint_callback = ModelCheckpoint(
         monitor='val_loss',
         dirpath=(Path.cwd() / 'checkpoints').as_posix(),
-        filename='seresnet3-{epoch:02d}-{val_loss:.3f}',
-        save_top_k=3,
+        filename=cfg.model + '-{epoch:02d}-{val_loss:.3f}',
+        save_top_k=2,
         mode='min',
         save_last=True,
     )
-
-    # if args.path
     trainer = pl.Trainer(
         resume_from_checkpoint=cfg.path_load if cfg.path_load != "None" else None,
         max_epochs=cfg.epochs,

@@ -40,7 +40,14 @@ def add_noise(sample: np.ndarray, noise_sample: np.ndarray, max_vol_tune: float,
 
 def get_noise(length: int) -> np.ndarray:
     color = random.choice(['white', 'pink', 'blue', 'brown', 'violet'])
-    return noise(length, color)
+    return noise(length, color).astype('float32')
+
+
+def standartize_peaks(sample: np.ndarray, min_chunks: int, max_chunks: int) -> np.ndarray:
+    num_chunks = random.randint(min_chunks, max_chunks)
+    chunks = np.array_split(sample, num_chunks)
+    normed_chunks = [chunk / np.max(chunk) for chunk in chunks]
+    return np.concatenate(normed_chunks)
 
 
 class ZindiAudioDataset(Dataset):
@@ -50,7 +57,7 @@ class ZindiAudioDataset(Dataset):
         pad_length: int,
         input_df: pd.DataFrame,
         data_dir: Path,
-        aug_config: Optional[Dict[str, Union[int, float]]] = None,
+        transforms_config: Optional[Dict[str, Union[int, float]]] = None,
         mode: str = 'train',
         label2idx: Optional[Dict[str, int]] = None
     ) -> None:
@@ -58,7 +65,7 @@ class ZindiAudioDataset(Dataset):
         self.pad_length = pad_length
         self.data_dir = data_dir
         self.label2idx = label2idx
-        self.aug_config = aug_config
+        self.transforms_config = transforms_config
         self.mode = mode
 
         self.sample_paths = [self.data_dir / f_path for f_path in input_df['fn'].values]
@@ -78,13 +85,15 @@ class ZindiAudioDataset(Dataset):
         sample = self.samples[idx]
         if self.mode == 'train':
             aug_flags = [random.uniform(0, 1) for _ in range(3)]
-            if aug_flags[0] < 0.5 and self.aug_config['time_shift'] != 0:
-                sample = time_shift(sample, self.aug_config['time_shift'])
-            if aug_flags[1] < 0.5 and self.aug_config['speed_tune'] != 0:
-                sample = speed_tune(sample, self.aug_config['speed_tune'])
-            if aug_flags[2] < 0.5 and self.aug_config['noise_vol'] != 0:
+            if aug_flags[0] < 0.5 and self.transforms_config['time_shift'] != 0:
+                sample = time_shift(sample, self.transforms_config['time_shift'])
+            if aug_flags[1] < 0.5 and self.transforms_config['speed_tune'] != 0:
+                sample = speed_tune(sample, self.transforms_config['speed_tune'])
+            if aug_flags[2] < 0.5 and self.transforms_config['noise_vol'] != 0:
                 noise_sample = get_noise(len(sample))
-                sample = add_noise(sample, noise_sample, self.aug_config['volume_tune'], self.aug_config['noise_vol'])
+                sample = add_noise(sample, noise_sample, self.transforms_config['volume_tune'], self.transforms_config['noise_vol'])
+        if self.transforms_config['standartize_peaks']:
+            sample = standartize_peaks(sample, min_chunks=20, max_chunks=50)
         sample = pad_sample(sample, self.pad_length)
         if self.label2idx is not None:
             return sample, self.label2idx[self.labels[idx]]

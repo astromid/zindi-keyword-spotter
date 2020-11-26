@@ -158,6 +158,7 @@ class SeResNet3(nn.Module):
         out = self.res1(out)
         out = F.max_pool2d(out, kernel_size=2, stride=2)
         out = F.dropout(out, p=0.1)
+
         out = self.conv2(out)
         out = self.bn2(out)
         out = F.relu(out)
@@ -234,3 +235,71 @@ class ResNest(nn.Module):
         norm_x = norm_x.repeat(1, 3, 1, 1)
         out = self.resnest(norm_x)
         return out
+
+
+class WideConvolutionsModel(nn.Module):
+
+    def __init__(
+        self,
+        num_classes: int,
+        hop_length: int,
+        sample_rate: int,
+        n_mels: int,
+        n_fft: int,
+        power: float,
+        normalize: bool,
+        use_decibels: bool,
+    ) -> None:
+        super().__init__()
+        self.use_decibels = use_decibels
+        self.melspectrogram = MelSpectrogram(
+            sample_rate=sample_rate,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            n_mels=n_mels,
+            power=power,
+            normalized=normalize,
+        )
+        self.amplitude2db = AmplitudeToDB()
+        self.input_bn = nn.BatchNorm2d(num_features=1)
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=64, kernel_size=[7, 3])
+        self.bn1 = nn.BatchNorm2d(num_features=64)
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=[1, 7])
+        self.bn2 = nn.BatchNorm2d(num_features=128)
+        self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=[1, 10])
+        self.bn3 = nn.BatchNorm2d(num_features=256)
+        self.conv4 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=[7, 1])
+        self.bn4 = nn.BatchNorm2d(num_features=512)
+        self.logits = nn.Linear(in_features=512, out_features=num_classes)
+
+    def forward(self, x: Tensor) -> Tensor:
+        mel = self.melspectrogram(x)
+        if self.use_decibels:
+            mel = self.amplitude2db(mel)
+        # (N, H, W) -> (N, C, H, W) & bn
+        norm_x = self.input_bn(mel.unsqueeze(1))
+        out = self.conv1(norm_x)
+        out = self.bn1(out)
+        out = F.relu(out)
+        out = F.max_pool2d(out, kernel_size=[1, 3])
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = F.relu(out)
+        out = F.max_pool2d(out, kernel_size=[1, 4])
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+        out = F.relu(out)
+        out = F.max_pool2d(out, kernel_size=[1, 10])
+
+        out = self.conv4(out)
+        out = self.bn4(out)
+        out = F.relu(out)
+        out = F.max_pool2d(out, kernel_size=[7, 1])
+        # global avg pooling - get mean from each channel
+        # (N, C, H, W) -> (N, C)
+        feature_vector = out.mean(dim=(2, 3))
+        return self.logits(feature_vector)
+
+

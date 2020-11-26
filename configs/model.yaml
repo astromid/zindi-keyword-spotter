@@ -9,7 +9,7 @@ sample_rate: 16000
 pad_length: 32000
 all_train_csv: /home/alexander/Python/zindi-keyword-spotter/data/raw/all_train.csv
 test_csv: /home/alexander/Python/zindi-keyword-spotter/data/raw/SampleSubmission.csv
-val_size: 0.2
+val_size: 'chess'
 data_dir: /home/alexander/Python/zindi-keyword-spotter/data/interim
 path_load: "None"
 train_utts: [
@@ -35,13 +35,15 @@ val_utts: [
 ]
 # augs & tricks params
 balance_weights: False
-balance_sampler: True
+balance_sampler: False
 eps_smooth: 0
 time_shift: 0
 speed_tune: 0.18382195713788005
 volume_tune: 0.1719448358250998
 noise_vol: 0.1626444231658449
+standartize_peaks: False
 # model params
+model: 'resnest'
 hop_length: 210
 n_mels: 104
 n_fft: 1853
@@ -51,10 +53,11 @@ use_decibels: True
 # training params
 gpus: '0'
 loss: 'focal' # 'ce'
-batch_size: 48
+focal_gamma: 3.5
+batch_size: 32
 lr: 0.0009533759012404169
 lr_find: False
-scheduler: null
+scheduler: 'plateau'
 epochs: 200
 n_workers: 1
 # from pretrained path
