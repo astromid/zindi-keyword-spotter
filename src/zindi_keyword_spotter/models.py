@@ -1,3 +1,4 @@
+import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.tensor import Tensor
@@ -150,14 +151,13 @@ class SeResNet3(nn.Module):
             mel = self.amplitude2db(mel)
         # (N, H, W) -> (N, C, H, W) & bn
         norm_x = self.input_bn(mel.unsqueeze(1))
-        
+
         out = self.conv1(norm_x)
         out = self.bn1(out)
         out = F.relu(out)
         out = self.res1(out)
         out = F.max_pool2d(out, kernel_size=2, stride=2)
         out = F.dropout(out, p=0.1)
-
         out = self.conv2(out)
         out = self.bn2(out)
         out = F.relu(out)
@@ -188,3 +188,49 @@ class SeResNet3(nn.Module):
         # (N, C, H, W) -> (N, C)
         feature_vector = out.mean(dim=(2, 3))
         return self.logits(feature_vector)
+
+
+class ResNest(nn.Module):
+    def __init__(
+            self,
+            num_classes: int,
+            hop_length: int,
+            sample_rate: int,
+            n_mels: int,
+            n_fft: int,
+            power: float,
+            normalize: bool,
+            use_decibels: bool,
+            resnest_name: str,
+            pretrained: bool = True
+    ) -> None:
+        """
+        :param resnest_name: one of ['resnest101', 'resnest200', 'resnest269', 'resnest50', 'resnest50_fast_1s1x64d',
+            'resnest50_fast_1s2x40d', 'resnest50_fast_1s4x24d', 'resnest50_fast_2s1x64d', 'resnest50_fast_2s2x40d',
+            'resnest50_fast_4s1x64d', 'resnest50_fast_4s2x40d']
+        """
+        super().__init__()
+        self.use_decibels = use_decibels
+        self.melspectrogram = MelSpectrogram(
+            sample_rate=sample_rate,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            n_mels=n_mels,
+            power=power,
+            normalized=normalize,
+        )
+        self.amplitude2db = AmplitudeToDB()
+        self.input_bn = nn.BatchNorm2d(num_features=1)
+
+        self.resnest = torch.hub.load('zhanghang1989/ResNeSt', resnest_name, pretrained=pretrained)
+        self.resnest.fc = nn.Linear(2048, num_classes)
+
+    def forward(self, x: Tensor) -> Tensor:
+        mel = self.melspectrogram(x)
+        if self.use_decibels:
+            mel = self.amplitude2db(mel)
+        # (N, H, W) -> (N, C, H, W) & bn
+        norm_x = self.input_bn(mel.unsqueeze(1))
+        norm_x = norm_x.repeat(1, 3, 1, 1)
+        out = self.resnest(norm_x)
+        return out

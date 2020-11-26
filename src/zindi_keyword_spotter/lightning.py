@@ -10,7 +10,7 @@ from omegaconf.dictconfig import DictConfig
 from sklearn.model_selection import train_test_split
 from torch.nn import CrossEntropyLoss, Module
 from torch.optim import Adam, Optimizer
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CyclicLR
 from torch.tensor import Tensor
 from torch.utils.data import DataLoader, Dataset
 from torchsampler import ImbalancedDatasetSampler
@@ -34,6 +34,7 @@ class PLClassifier(pl.LightningModule):
         self.lr = lr
         self.scheduler = scheduler
         self.probs: Optional[np.ndarray] = None
+        self.best_val_loss = 999
         if loss_name == 'ce':
             self.criterion = CrossEntropyLoss(weight=weights)
         elif loss_name == 'focal':
@@ -44,6 +45,7 @@ class PLClassifier(pl.LightningModule):
     
     def training_step(self, batch, batch_idx: int) -> Tensor:
         x, y = batch
+        x = x.float()
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
         self.log('train_loss', loss)
@@ -51,10 +53,14 @@ class PLClassifier(pl.LightningModule):
     
     def validation_step(self, batch, batch_idx: int) -> Tensor:
         x, y = batch
+        x = x.float()
         y_hat = self(x)
         # lb metric is log loss
         loss = F.cross_entropy(y_hat, y)
         self.log('val_loss', loss, prog_bar=True)
+        best_val_loss = loss.cpu().numpy()
+        if best_val_loss < self.best_val_loss:
+            self.best_val_loss = best_val_loss
         return loss
     
     def test_step(self, batch, batch_idx: int) -> Tensor:
@@ -71,7 +77,8 @@ class PLClassifier(pl.LightningModule):
         elif self.scheduler == 'plateau':
             return {
                 'optimizer': optimizer,
-                'lr_scheduler': ReduceLROnPlateau(optimizer, factor=0.3, patience=5, eps=1e-5, cooldown=3, min_lr=1e-6, verbose=True),
+                # 'lr_scheduler': ReduceLROnPlateau(optimizer, factor=0.3, patience=5, eps=1e-5, cooldown=3, min_lr=1e-6, verbose=True),
+                'lr_sheduler': CyclicLR(optimizer, base_lr=1e-6, max_lr=1e-3, step_size_up=40, mode="exp_range", gamma=0.85),
                 'monitor': 'val_loss',
             }
 
@@ -82,7 +89,6 @@ def callback_get_label(dataset: ZindiAudioDataset, idx: int) -> int:
 
 
 class ZindiDataModule(pl.LightningDataModule):
-
     def __init__(
         self,
         cfg: DictConfig,
@@ -93,6 +99,7 @@ class ZindiDataModule(pl.LightningDataModule):
         test_df: Optional[pd.DataFrame] = None,
         balance_sampler: bool = False,
         n_workers: int = 1,
+        params: dict = None
     ) -> None:
         super().__init__()
         self.pad_length = cfg.pad_length
@@ -103,10 +110,10 @@ class ZindiDataModule(pl.LightningDataModule):
         self.train_utts = cfg.train_utts
         self.val_utts = cfg.val_utts
         self.aug_config = {
-            'time_shift': cfg.time_shift,
-            'speed_tune': cfg.speed_tune,
-            'volume_tune': cfg.volume_tune,
-            'noise_vol': cfg.noise_vol,
+            'time_shift': int(params["time_shift"]) if params else cfg.time_shift,
+            'speed_tune': params["speed_tune"] if params else cfg.speed_tune,
+            'volume_tune': params["volume_tune"] if params else cfg.volume_tune,
+            'noise_vol': params["noise_vol"] if params else cfg.noise_vol,
         }
         self.label2idx = label2idx
         self.train_df = train_df
