@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
+from matplotlib.pyplot import axis
 
 import numpy as np
 import pandas as pd
@@ -10,7 +11,7 @@ from omegaconf.dictconfig import DictConfig
 from sklearn.model_selection import train_test_split
 from torch.nn import CrossEntropyLoss, Module
 from torch.optim import Adam, Optimizer
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
 from torch.tensor import Tensor
 from torch.utils.data import DataLoader, Dataset
 from torchsampler import ImbalancedDatasetSampler
@@ -41,7 +42,7 @@ class PLClassifier(pl.LightningModule):
         if loss_name == 'ce':
             self.criterion = CrossEntropyLoss(weight=weights)
         elif loss_name == 'focal':
-            gamma = loss_params['gamma']
+            gamma = loss_params['focal_gamma']
             self.criterion = FocalLoss(alpha=weights, gamma=gamma)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -75,8 +76,13 @@ class PLClassifier(pl.LightningModule):
         elif self.scheduler == 'plateau':
             return {
                 'optimizer': optimizer,
-                'lr_scheduler': ReduceLROnPlateau(optimizer, factor=0.3, patience=10, eps=1e-5, cooldown=3, min_lr=1e-6, verbose=True),
+                'lr_scheduler': ReduceLROnPlateau(optimizer, factor=0.1, patience=25, eps=1e-4, cooldown=0, min_lr=2e-7, verbose=True),
                 'monitor': 'val_loss',
+            }
+        elif self.scheduler == '1cycle':
+            return {
+                'optimizer': optimizer,
+                'lr_scheduler': OneCycleLR(optimizer, max_lr=self.lr, )
             }
 
 
@@ -95,8 +101,6 @@ class ZindiDataModule(pl.LightningDataModule):
         label2idx: Optional[Dict[str, int]] = None,
         train_df: Optional[pd.DataFrame] = None,
         test_df: Optional[pd.DataFrame] = None,
-        balance_sampler: bool = False,
-        n_workers: int = 1,
     ) -> None:
         super().__init__()
         self.pad_length = cfg.pad_length
@@ -106,24 +110,25 @@ class ZindiDataModule(pl.LightningDataModule):
         self.val_size = cfg.val_size
         self.train_utts = cfg.train_utts
         self.val_utts = cfg.val_utts
-        self.aug_config = {
+        self.transforms_config = {
             'time_shift': cfg.time_shift,
             'speed_tune': cfg.speed_tune,
             'volume_tune': cfg.volume_tune,
             'noise_vol': cfg.noise_vol,
+            'standartize_peaks': cfg.standartize_peaks,
         }
         self.label2idx = label2idx
         self.train_df = train_df
         self.test_df = test_df
         self.val_df = None
-        self.balance_sampler = balance_sampler
-        self.n_workers = n_workers
+        self.balance_sampler = cfg.balance_sampler
+        self.n_workers = cfg.n_workers
 
         self.train: Optional[Dataset] = None
         self.val: Optional[Dataset] = None
         self.test: Optional[Dataset] = None
     
-    def prepare_data(self) -> None:
+    def create_sized_split(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         utt_counts = self.train_df['utt_id'].value_counts()
         # get utt_ids that occure only once in dataset
         unique_utts = utt_counts[utt_counts == 1].index.values
@@ -138,14 +143,45 @@ class ZindiDataModule(pl.LightningDataModule):
 
         train_df = pd.concat((train_df1, train_df2), axis=0)
         val_df = pd.concat((val_df1, val_df2), axis=0)
+        return train_df, val_df
+    
+    def create_chess_split(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        # split across utts in chess order
+        all_labels = sorted(self.train_df['label'].unique())
+        train_parts = []
+        val_parts = []
+        for label in all_labels:
+            label_samples = self.train_df[self.train_df['label'] == label]
+            label_utts = label_samples['utt_id'].value_counts().index.values
+            for idx, utt_id in enumerate(label_utts):
+                utt_samples = label_samples[label_samples['utt_id'] == utt_id].copy()
+                if idx % 2 == 0:
+                    train_parts.append(utt_samples)
+                else:
+                    val_parts.append(utt_samples)
+        train_df = pd.concat(train_parts, axis=0, ignore_index=True)
+        val_df = pd.concat(val_parts, axis=0, ignore_index=True)
+
+        val_labels = sorted(val_df['label'].unique())
+        if not (all_labels == val_labels):
+            raise ValueError('val_df is corrupted: some labels are gone.')
+        return train_df, val_df
+    
+    def prepare_data(self) -> None:
+        if self.val_size == 'chess':
+            train_df, val_df = self.create_chess_split()
+        else:
+            train_df, val_df = self.create_sized_split()
 
         all_labels = sorted(self.train_df['label'].unique())
         train_labels = sorted(train_df['label'].unique())
-        val_labels = sorted(val_df['label'].unique())
         if not (all_labels == train_labels):
             raise ValueError('train_df is corrupted: some labels are gone.')
-        if not (all_labels == val_labels):
-            raise ValueError('val_df is corrupted: some labels are gone.')
+        
+        train_samples = set(train_df['fn'].values)
+        val_samples = set(val_df['fn'].values)
+        if not train_samples.isdisjoint(val_samples):
+            raise ValueError('Split is corrupted: train and val is not disjoint.')
         # save current train/val split
         train_df.to_csv(self.log_dir / 'current_train.csv', index=False)
         val_df.to_csv(self.log_dir / 'current_val.csv', index=False)
@@ -161,7 +197,7 @@ class ZindiDataModule(pl.LightningDataModule):
                 data_dir=self.data_dir,
                 mode='train',
                 label2idx=self.label2idx,
-                aug_config=self.aug_config,
+                transforms_config=self.transforms_config,
             )
             if self.val_df is not None:
                 self.val = ZindiAudioDataset(
@@ -170,9 +206,10 @@ class ZindiDataModule(pl.LightningDataModule):
                     data_dir=self.data_dir,
                     mode='val',
                     label2idx=self.label2idx,
+                    transforms_config=self.transforms_config,
                 )
         if stage == 'test' or (stage is None and self.test_df is not None):
-            self.test = ZindiAudioDataset(self.pad_length, self.test_df, data_dir=self.data_dir, mode='test')
+            self.test = ZindiAudioDataset(self.pad_length, self.test_df, data_dir=self.data_dir, mode='test', transforms_config=self.transforms_config)
     
     def train_dataloader(self) -> DataLoader:
         sampler = ImbalancedDatasetSampler(self.train, callback_get_label=callback_get_label) if self.balance_sampler else None
