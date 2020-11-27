@@ -9,7 +9,7 @@ sample_rate: 16000
 pad_length: 32000
 all_train_csv: /home/alexander/Python/zindi-keyword-spotter/data/raw/all_train.csv
 test_csv: /home/alexander/Python/zindi-keyword-spotter/data/raw/SampleSubmission.csv
-val_type: 'lite'
+val_type: 'chess'
 data_dir: /home/alexander/Python/zindi-keyword-spotter/data/interim
 path_load: "None"
 train_utts: [
