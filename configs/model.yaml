@@ -58,12 +58,12 @@ batch_size: 32
 lr: 0.0009533759012404169
 lr_find: False
 scheduler: 'plateau'
-epochs: 200
+epochs: 50
 n_workers: 1
 # from pretrained path
 path: '/home/alexander/Python/zindi-keyword-spotter/models/seresnet3-11-26_09-26/checkpoints/seresnet3-epoch=50-val_loss=1.548.ckpt'
 # hydra
 hydra:
   run:
-    dir: models/seresnet3-${now:%m-%d_%H-%M}
+    dir: models/model-${now:%m-%d_%H-%M}
   # verbose: __main__

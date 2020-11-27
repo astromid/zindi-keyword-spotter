@@ -14,7 +14,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from sklearn.utils.class_weight import compute_class_weight
 from zindi_keyword_spotter.lightning import PLClassifier, ZindiDataModule
-from zindi_keyword_spotter.models import ResNest, SeResNet3
+from zindi_keyword_spotter.models import ResNest, SeResNet3, WideConvolutionsModel
 import logging
 
 sns.set()
@@ -42,36 +42,62 @@ def run(cfg, params) -> float:
         label2idx=label2idx,
         train_df=all_train_df,
         test_df=test_df,
-        balance_sampler=cfg.balance_sampler,
-        n_workers=cfg.n_workers,
         params=params
     )
     datamodule.prepare_data()
     datamodule.setup()
-    train_df = datamodule.train_df
-
+    # we assume that LB set is balanced
+    val_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.val_df['label'])
+    val_weights = torch.from_numpy(val_weights).float()
     if cfg.balance_weights:
-        class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), train_df['label'])
+        class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.train_df['label'])
         class_weights = torch.from_numpy(class_weights).float()
     else:
         class_weights = None
 
-    model = ResNest(
-        num_classes=train_df['label'].nunique(),
-        hop_length=int(params['hop_length']),
-        sample_rate=cfg.sample_rate,
-        n_mels=int(params['n_mels']),
-        n_fft=int(params['n_fft']),
-        power=params['power'],
-        normalize=params['normalize'],
-        use_decibels=params['use_decibels'],
-        resnest_name=params['resnest_name'],
-        pretrained=True
-    )
+    if cfg.model == 'seresnet3':
+        model = SeResNet3(
+            num_classes=datamodule.train_df['label'].nunique(),
+            hop_length=cfg.hop_length,
+            sample_rate=cfg.sample_rate,
+            n_mels=cfg.n_mels,
+            n_fft=cfg.n_fft,
+            power=cfg.power,
+            normalize=cfg.normalize,
+            use_decibels=cfg.use_decibels,
+        )
+    elif cfg.model == 'wconv':
+        model = WideConvolutionsModel(
+            num_classes=datamodule.train_df['label'].nunique(),
+            hop_length=cfg.hop_length,
+            sample_rate=cfg.sample_rate,
+            n_mels=cfg.n_mels,
+            n_fft=cfg.n_fft,
+            power=cfg.power,
+            normalize=cfg.normalize,
+            use_decibels=cfg.use_decibels,
+        )
+    elif cfg.model == 'resnest':
+        model = ResNest(
+            num_classes=datamodule.train_df['label'].nunique(),
+            hop_length=int(params['hop_length']),
+            sample_rate=cfg.sample_rate,
+            n_mels=int(params['n_mels']),
+            n_fft=int(params['n_fft']),
+            power=params['power'],
+            normalize=params['normalize'],
+            use_decibels=params['use_decibels'],
+            resnest_name='resnest269',
+            pretrained=True
+        )
+    else:
+        raise ValueError('Incorrect model.')
 
+    loss_params = {'focal_gamma': cfg.focal_gamma}
     pl_model = PLClassifier(
         model=model,
-        loss_name=params['loss'],
+        loss_name=cfg.loss,
+        loss_params=loss_params,
         lr=params['lr'],
         scheduler=cfg.scheduler,
         weights=class_weights,
@@ -86,8 +112,8 @@ def run(cfg, params) -> float:
     checkpoint_callback = ModelCheckpoint(
         monitor='val_loss',
         dirpath=(Path.cwd() / 'checkpoints').as_posix(),
-        filename='seresnet3-{epoch:02d}-{val_loss:.3f}',
-        save_top_k=3,
+        filename=cfg.model + '-{epoch:02d}-{val_loss:.3f}',
+        save_top_k=2,
         mode='min',
         save_last=True,
     )
@@ -112,11 +138,11 @@ def run(cfg, params) -> float:
     sub_df.columns = test_df.columns[1:]
     sub_df.insert(0, 'fn', test_df['fn'])
     sub_df.to_csv(Path.cwd() / 'submission.csv', float_format='%.8f', index=False, header=True)
-    logger.info(f'PARAMS: {params} \n LOSS: {pl_model.best_val_loss} \n {"="*10} \n')
+    logger.info(f'\n {"="*50} \n')
     return pl_model.best_val_loss
 
 
-@hydra.main(config_path='../configs', config_name='seresnet3')
+@hydra.main(config_path='../configs', config_name='model')
 def main(cfg):
     def objective(trial):
         params = {
@@ -126,13 +152,12 @@ def main(cfg):
             'power': trial.suggest_float('power', 1.5, 4.0),
             'normalize': trial.suggest_categorical('normalize', [True, False]),
             'use_decibels': trial.suggest_categorical('use_decibels', [True, False]),
-            'resnest_name': trial.suggest_categorical('resnest_name', ['resnest101', 'resnest200', 'resnest269']),
             'time_shift': trial.suggest_int('time_shift', 0, 8000, 1000),
             'speed_tune': trial.suggest_float('speed_tune', 0, 0.4),
             'volume_tune': trial.suggest_float('volume_tune', 0, 0.4),
             'noise_vol': trial.suggest_float('noise_vol', 0, 0.4),
             'lr': trial.suggest_loguniform('lr', 1e-6, 1e-3),
-            'loss': trial.suggest_categorical('loss', ['ce', 'focal'])
+            'focal_gamma': trial.suggest_float('focal_gamma', 1.0, 3.5)
         }
 
         score = run(cfg, params)
