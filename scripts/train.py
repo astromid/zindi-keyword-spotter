@@ -39,9 +39,13 @@ def main(cfg: DictConfig) -> None:
     )
     datamodule.prepare_data()
     datamodule.setup()
+    LOG.info(f'Train: {len(datamodule.train_df)} samples, val {len(datamodule.val_df)} samples.')
     # we assume that LB set is balanced
-    val_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.val_df['label'])
-    val_weights = torch.from_numpy(val_weights).float()
+    if cfg.val_type != 'lite':
+        val_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.val_df['label'])
+        val_weights = torch.from_numpy(val_weights).float()
+    else:
+        val_weights = None
     if cfg.balance_weights:
         class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.train_df['label'])
         class_weights = torch.from_numpy(class_weights).float()
@@ -74,12 +78,15 @@ def main(cfg: DictConfig) -> None:
         raise ValueError('Incorrect model.')
 
     loss_params = {'focal_gamma': cfg.focal_gamma}
+    total_steps = cfg.epochs * (len(datamodule.train) // cfg.batch_size + 1)
     pl_model = PLClassifier(
         model=model,
         loss_name=cfg.loss,
         loss_params=loss_params,
         lr=cfg.lr,
+        wd=cfg.wd,
         scheduler=cfg.scheduler,
+        total_steps=total_steps,
         weights=class_weights,
         val_weights=val_weights,
     )
@@ -110,7 +117,7 @@ def main(cfg: DictConfig) -> None:
 
     trainer.fit(pl_model, datamodule)
 
-    trainer.test()
+    trainer.test(ckpt_path=None)
     sub_df = pd.DataFrame(pl_model.probs)
     sub_df.columns = test_df.columns[1:]
     sub_df.insert(0, 'fn', test_df['fn'])

@@ -46,8 +46,13 @@ def get_noise(length: int) -> np.ndarray:
 def standartize_peaks(sample: np.ndarray, min_chunks: int, max_chunks: int) -> np.ndarray:
     num_chunks = random.randint(min_chunks, max_chunks)
     chunks = np.array_split(sample, num_chunks)
-    normed_chunks = [chunk / np.max(chunk) for chunk in chunks]
-    return np.concatenate(normed_chunks)
+    norm_chunks = []
+    for chunk in chunks:
+        norm_chunk = chunk / chunk.max()
+        nonfinite_idxs = ~np.isfinite(norm_chunk)
+        norm_chunk[nonfinite_idxs] = chunk[nonfinite_idxs]
+        norm_chunks.append(norm_chunk)
+    return np.concatenate(norm_chunks)
 
 
 class ZindiAudioDataset(Dataset):
@@ -57,7 +62,7 @@ class ZindiAudioDataset(Dataset):
         pad_length: int,
         input_df: pd.DataFrame,
         data_dir: Path,
-        transforms_config: Optional[Dict[str, Union[int, float]]] = None,
+        transforms_config: Optional[Dict[str, Union[int, float, bool]]] = None,
         mode: str = 'train',
         label2idx: Optional[Dict[str, int]] = None
     ) -> None:
@@ -76,13 +81,19 @@ class ZindiAudioDataset(Dataset):
         self.samples: List[np.ndarray] = []
         for path in tqdm(self.sample_paths, desc=f'Loading {self.mode} samples'):
             _, sample = wavfile.read(path)
-            self.samples.append(sample)
+            # delete zeros from the start & end
+            first_nonzero_idx = (sample != 0).argmax()
+            # last nonzero idx + 1
+            last_nonzero_idx = len(sample) - (np.flip(sample) != 0).argmax()
+            self.samples.append(sample[first_nonzero_idx:last_nonzero_idx])
 
     def __len__(self) -> int:
         return len(self.samples)
     
     def __getitem__(self, idx: int):
         sample = self.samples[idx]
+        if self.transforms_config['standartize_peaks']:
+            sample = standartize_peaks(sample, min_chunks=20, max_chunks=50)
         if self.mode == 'train':
             aug_flags = [random.uniform(0, 1) for _ in range(3)]
             if aug_flags[0] < 0.5 and self.transforms_config['time_shift'] != 0:
@@ -92,8 +103,6 @@ class ZindiAudioDataset(Dataset):
             if aug_flags[2] < 0.5 and self.transforms_config['noise_vol'] != 0:
                 noise_sample = get_noise(len(sample))
                 sample = add_noise(sample, noise_sample, self.transforms_config['volume_tune'], self.transforms_config['noise_vol'])
-        if self.transforms_config['standartize_peaks']:
-            sample = standartize_peaks(sample, min_chunks=20, max_chunks=50)
         sample = pad_sample(sample, self.pad_length)
         if self.label2idx is not None:
             return sample, self.label2idx[self.labels[idx]]
