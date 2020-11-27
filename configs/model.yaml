@@ -9,7 +9,7 @@ sample_rate: 16000
 pad_length: 32000
 all_train_csv: /home/alexander/Python/zindi-keyword-spotter/data/raw/all_train.csv
 test_csv: /home/alexander/Python/zindi-keyword-spotter/data/raw/SampleSubmission.csv
-val_size: 'chess'
+val_type: 'lite'
 data_dir: /home/alexander/Python/zindi-keyword-spotter/data/interim
 path_load: "None"
 train_utts: [
@@ -43,7 +43,7 @@ volume_tune: 0.1719448358250998
 noise_vol: 0.1626444231658449
 standartize_peaks: False
 # model params
-model: 'resnest'
+model: 'seresnet3'
 hop_length: 210
 n_mels: 104
 n_fft: 1853
@@ -52,18 +52,18 @@ normalize: True
 use_decibels: True
 # training params
 gpus: '0'
-loss: 'focal' # 'ce'
+loss: 'ce' # 'focal'
 focal_gamma: 3.5
 batch_size: 32
 lr: 0.0009533759012404169
 lr_find: False
-scheduler: 'plateau'
+scheduler: '1cycle'
 epochs: 50
-n_workers: 1
+n_workers: 16
 # from pretrained path
 path: '/home/alexander/Python/zindi-keyword-spotter/models/seresnet3-11-26_09-26/checkpoints/seresnet3-epoch=50-val_loss=1.548.ckpt'
 # hydra
 hydra:
   run:
-    dir: models/model-${now:%m-%d_%H-%M}
-  # verbose: __main__
+    dir: models/${model}-${now:%m-%d_%H-%M}
+  verbose: __main__

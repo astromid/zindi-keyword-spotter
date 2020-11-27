@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from omegaconf.dictconfig import DictConfig
 from sklearn.model_selection import train_test_split
 from torch.nn import CrossEntropyLoss, Module
-from torch.optim import Adam, Optimizer
+from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
 from torch.tensor import Tensor
 from torch.utils.data import DataLoader, Dataset
@@ -27,7 +27,9 @@ class PLClassifier(pl.LightningModule):
         model: Module,
         loss_name: str,
         lr: float,
+        wd: float,
         scheduler: Optional[str],
+        total_steps: int,
         weights: Optional[Tensor] = None,
         val_weights: Optional[Tensor] = None,
         loss_params: Optional[Dict[str, float]] = None,
@@ -35,7 +37,9 @@ class PLClassifier(pl.LightningModule):
         super().__init__()
         self.model = model
         self.lr = lr
+        self.wd = wd
         self.scheduler = scheduler
+        self.total_steps = total_steps
         self.probs: Optional[np.ndarray] = None
         # lb metric is log loss
         self.val_criterion = CrossEntropyLoss(weight=val_weights)
@@ -76,7 +80,7 @@ class PLClassifier(pl.LightningModule):
         self.probs = F.softmax(logits, dim=1).numpy()
     
     def configure_optimizers(self) -> Optional[Union[Optimizer, Sequence[Optimizer], Dict, Sequence[Dict], Tuple[List, List]]]:
-        optimizer = Adam(self.parameters(), lr=self.lr)
+        optimizer = AdamW(self.parameters(), lr=self.lr, weight_decay=self.wd)
         if self.scheduler is None:
             return optimizer
         elif self.scheduler == 'plateau':
@@ -88,7 +92,7 @@ class PLClassifier(pl.LightningModule):
         elif self.scheduler == '1cycle':
             return {
                 'optimizer': optimizer,
-                'lr_scheduler': OneCycleLR(optimizer, max_lr=self.lr, )
+                'lr_scheduler': OneCycleLR(optimizer, max_lr=10**2 * self.lr, total_steps=self.total_steps)
             }
 
 
@@ -114,7 +118,7 @@ class ZindiDataModule(pl.LightningDataModule):
         self.batch_size = cfg.batch_size
         self.data_dir = data_dir
         self.log_dir = log_dir
-        self.val_size = cfg.val_size
+        self.val_type = cfg.val_type
         self.train_utts = cfg.train_utts
         self.val_utts = cfg.val_utts
         self.transforms_config = {
@@ -144,7 +148,7 @@ class ZindiDataModule(pl.LightningDataModule):
         unique_utt_samples = self.train_df[self.train_df['utt_id'].isin(unique_utts)]
         nonunique_utt_sample = self.train_df[~self.train_df['utt_id'].isin(unique_utts)]
 
-        train_df1, val_df1 = train_test_split(unique_utt_samples, stratify=unique_utt_samples['label'], test_size=self.val_size)
+        train_df1, val_df1 = train_test_split(unique_utt_samples, stratify=unique_utt_samples['label'], test_size=self.val_type)
         train_df2 = nonunique_utt_sample[nonunique_utt_sample['utt_id'].isin(self.train_utts)]
         val_df2 = nonunique_utt_sample[nonunique_utt_sample['utt_id'].isin(self.val_utts)]
 
@@ -174,9 +178,17 @@ class ZindiDataModule(pl.LightningDataModule):
             raise ValueError('val_df is corrupted: some labels are gone.')
         return train_df, val_df
 
+    def create_lite_split(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        # just take 2 samples from each label (original part) to validation
+        val_df = self.train_df[self.train_df['group'] == 'original'].groupby('label').head(2)
+        train_df = self.train_df[~self.train_df.index.isin(val_df.index)]
+        return train_df, val_df
+
     def prepare_data(self) -> None:
-        if self.val_size == 'chess':
+        if self.val_type == 'chess':
             train_df, val_df = self.create_chess_split()
+        elif self.val_type == 'lite':
+            train_df, val_df = self.create_lite_split()
         else:
             train_df, val_df = self.create_sized_split()
 
