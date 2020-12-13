@@ -4,6 +4,12 @@
 #  'power': 3.63434796121065, 'normalize': True, 'use_decibels': True,
 #  'time_shift': 0, 'speed_tune': 0.18382195713788005, 'volume_tune': 0.1719448358250998,
 #  'noise_vol': 0.1626444231658449, 'lr': 0.0009533759012404169, 'loss': 'ce'}
+
+#Trial 6 finished with value: 0.06994901597499847 and parameters:
+#  {'hop_length': 190.0, 'n_mels': 120.0, 'n_fft': 1574, 'power': 1.6277430881745039,
+#   'normalize': True, 'use_decibels': True, 'time_shift': 8000, 'speed_tune': 0.06600804986619538,
+#   'volume_tune': 0.20307609431149776, 'noise_vol': 0.04782107820747226, 'lr': 0.00013994198826959952,
+#   'focal_gamma': 3.187261079900525}. Best is trial 6 with value: 0.06994901597499847.
 seed: 14300631
 sample_rate: 16000
 pad_length: 32000
@@ -37,31 +43,32 @@ val_utts: [
 balance_weights: False
 balance_sampler: False
 eps_smooth: 0
-time_shift: 0
-speed_tune: 0.18382195713788005
-volume_tune: 0.1719448358250998
-noise_vol: 0.1626444231658449
+time_shift: 8000
+speed_tune: 0.06600804986619538
+volume_tune: 0.20307609431149776
+noise_vol: 0.04782107820747226
 standartize_peaks: False
 # model params
-model: 'seresnet3'
-hop_length: 210
-n_mels: 104
-n_fft: 1853
-power: 3.63434796121065
+model: 'resnest'
+hop_length: 190
+n_mels: 120
+n_fft: 1574
+power: 1.6277430881745039
 normalize: True
 use_decibels: True
 # training params
 gpus: '0'
-loss: 'ce' # 'focal'
-focal_gamma: 3.5
+wd: 0.01
+loss: 'focal' # 'ce'
+focal_gamma: 3.187261079900525
 batch_size: 32
-lr: 0.0009533759012404169
+lr: 0.00013994198826959952
 lr_find: False
 scheduler: '1cycle'
-epochs: 50
-n_workers: 16
+epochs: 500
+n_workers: 4
 # from pretrained path
-path: '/home/alexander/Python/zindi-keyword-spotter/models/seresnet3-11-26_09-26/checkpoints/seresnet3-epoch=50-val_loss=1.548.ckpt'
+path: '/home/alexander/Python/zindi-keyword-spotter/models/resnest-11-28_18-34/checkpoints/resnest-epoch=82-val_loss=1.355.ckpt'
 # hydra
 hydra:
   run:

@@ -35,7 +35,7 @@ def predict(model, dataloader):
     return probs
 
 
-@hydra.main(config_path='../configs', config_name='seresnet3')
+@hydra.main(config_path='../configs', config_name='model')
 def main(cfg: DictConfig) -> None:
     orig_cwd = Path(hydra.utils.get_original_cwd())
     all_train_df = pd.read_csv(orig_cwd / cfg.all_train_csv)
@@ -51,21 +51,24 @@ def main(cfg: DictConfig) -> None:
         label2idx=label2idx,
         train_df=all_train_df,
         test_df=test_df,
-        balance_sampler=cfg.balance_sampler,
-        n_workers=cfg.n_workers
     )
     datamodule.prepare_data()
     datamodule.setup()
-    train_df = datamodule.train_df
-
+    LOG.info(f'Train: {len(datamodule.train_df)} samples, val {len(datamodule.val_df)} samples.')
+    # we assume that LB set is balanced
+    if cfg.val_type != 'lite':
+        val_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.val_df['label'])
+        val_weights = torch.from_numpy(val_weights).float()
+    else:
+        val_weights = None
     if cfg.balance_weights:
-        class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), train_df['label'])
+        class_weights = compute_class_weight('balanced', np.array(list(label2idx.keys())), datamodule.train_df['label'])
         class_weights = torch.from_numpy(class_weights).float()
     else:
         class_weights = None
 
     model = ResNest(
-        num_classes=train_df['label'].nunique(),
+        num_classes=datamodule.train_df['label'].nunique(),
         hop_length=cfg.hop_length,
         sample_rate=cfg.sample_rate,
         n_mels=cfg.n_mels,
@@ -77,13 +80,18 @@ def main(cfg: DictConfig) -> None:
         pretrained=True
     )
 
-    pl_model = PLClassifier.load_from_checkpoint(
-        cfg.path,
+    loss_params = {'focal_gamma': cfg.focal_gamma}
+    total_steps = cfg.epochs * (len(datamodule.train) // cfg.batch_size + 1)
+    pl_model = PLClassifier(
         model=model,
         loss_name=cfg.loss,
+        loss_params=loss_params,
         lr=cfg.lr,
+        wd=cfg.wd,
         scheduler=cfg.scheduler,
+        total_steps=total_steps,
         weights=class_weights,
+        val_weights=val_weights,
     )
 
     # logger = WandbLogger(
